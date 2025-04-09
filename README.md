@@ -117,6 +117,8 @@ volumes:
 
 # Nacos
 
+## 单机模式(Standalone)
+
 > 需要先到 Nacos 的 GitHub 下载 Release https://github.com/alibaba/nacos
 >
 > 然后初始化 MySQL 数据
@@ -138,11 +140,225 @@ services:
       - MYSQL_SERVICE_PASSWORD=123456 # MySQL 密码
       - MYSQL_SERVICE_DB_NAME=nacos_config # Nacos 数据库名
       - MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false
+      - NACOS_AUTH_ENABLE=true
+      - NACOS_AUTH_IDENTITY_KEY=admin
+      - NACOS_AUTH_IDENTITY_VALUE=admin
+      - NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
     ports:
       - "25001:8848" # 网页端口
       - "26001:9848" # gRpc 端口(必须是 网页端口+1000)
       - "26002:9849" # gRpc 端口(必须是 网页端口+1001)
 ```
+
+## 集群模式(Cluster)
+
+> 1. 和单机模式一样先要初始化 MySQL
+> 2. 集群3个节点没有暴露端口，统一用的 nginx 转发
+> 3. up 之后访问 : `http://locahost:8848/nacos`
+
+### Nacos
+
+#### `docker-compose.yml`
+
+```yaml
+services:
+  nacos1:
+    hostname: nacos1
+    container_name: nacos1
+    image: nacos/nacos-server:v2.5.1
+    volumes:
+      - ./cluster-logs/nacos1:/home/nacos/logs
+      - /etc/localtime:/etc/localtime:ro  # 时间同步
+    env_file:
+      - ./env/nacos-hostname.env
+    restart: always
+    networks:
+      - nacos_net
+
+  nacos2:
+    hostname: nacos2
+    container_name: nacos2
+    image: nacos/nacos-server:v2.5.1
+    volumes:
+      - ./cluster-logs/nacos2:/home/nacos/logs
+      - /etc/localtime:/etc/localtime:ro  # 时间同步
+    env_file:
+      - ./env/nacos-hostname.env
+    restart: always
+    networks:
+      - nacos_net
+
+  nacos3:
+    hostname: nacos3
+    container_name: nacos3
+    image: nacos/nacos-server:v2.5.1
+    volumes:
+      - ./cluster-logs/nacos3:/home/nacos/logs
+      - /etc/localtime:/etc/localtime:ro  # 时间同步
+    env_file:
+      - ./env/nacos-hostname.env
+    restart: always
+    networks:
+      - nacos_net
+
+networks:
+  nacos_net:
+    external: true
+```
+
+
+
+#### `nacos-hostname.env`
+
+```shell
+PREFER_HOST_MODE=hostname
+MODE=cluster
+NACOS_SERVERS=nacos1:8848 nacos2:8848 nacos3:8848
+SPRING_DATASOURCE_PLATFORM=mysql
+
+MYSQL_SERVICE_HOST=mysql
+MYSQL_SERVICE_DB_NAME=nacos
+MYSQL_SERVICE_PORT=3306
+MYSQL_SERVICE_USER=root
+MYSQL_SERVICE_PASSWORD=123456
+MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
+
+NACOS_AUTH_ENABLE=true
+NACOS_AUTH_IDENTITY_KEY=admin
+NACOS_AUTH_IDENTITY_VALUE=admin
+NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
+```
+
+
+
+### Nginx(转发 Naocs)
+
+#### `nginx/docker-compose.yml`
+
+```yaml
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: always
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/nginx.conf:/etc/nginx/nginx.conf
+      - ./data/conf.d:/etc/nginx/conf.d
+      - ./data/stream.d:/etc/nginx/stream.d
+      - ./data/logs:/var/log/nginx
+      - ./data/cert:/etc/nginx/cert
+      - ./data/html:/usr/share/nginx/html
+```
+
+
+
+#### `nginx/data/nginx.conf`
+
+```shell
+user  nginx;
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+
+    # 全局 gzip 设置
+    gzip on;
+    gzip_min_length 1k;
+    gzip_buffers 4 16k;
+    gzip_http_version 1.1;
+    gzip_comp_level 2;
+    gzip_types text/plain application/x-javascript text/css application/xml application/javascript;
+    gzip_proxied any;
+
+    include /etc/nginx/conf.d/*.conf;  # 加载所有子配置
+}
+
+stream {
+    include /etc/nginx/stream.d/*.conf;  # 从 conf.d 中加载 TCP 代理
+}
+```
+
+
+
+#### `nginx/data/conf.d/nacos.conf`
+
+```shell
+# -------------------- 日志格式 --------------------
+log_format nacos_log '$remote_addr - $remote_user [$time_local] '
+                     '"$request" $status $body_bytes_sent '
+                     '"$http_referer" "$http_user_agent" '
+                     '-> $upstream_addr';
+
+access_log /var/log/nginx/nacos_access.log nacos_log;
+
+# -------------------- HTTP 接口代理（Spring Cloud Discovery） --------------------
+upstream nacos_http {
+    server nacos1:8848;
+    server nacos2:8848;
+    server nacos3:8848;
+}
+
+server {
+    listen 8848;
+
+    location /nacos/ {
+        proxy_pass http://nacos_http/nacos/;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        send_timeout 60s;
+    }
+}
+```
+
+
+
+#### `nginx/data/stream.d/nacos-grpc.conf`
+
+```shell
+upstream nacos-grpc9848 {
+    server nacos-standalone:9848 weight=1 max_fails=2 fail_timeout=5s;
+
+    server nacos1:9848 weight=1 max_fails=2 fail_timeout=5s;
+    server nacos2:9848 weight=1 max_fails=2 fail_timeout=5s;
+    server nacos3:9848 weight=1 max_fails=2 fail_timeout=5s;
+}
+
+server {
+    listen 9848;
+    listen [::]:9848;
+    proxy_connect_timeout 1s;
+    proxy_timeout 3s;
+    proxy_pass nacos-grpc9848;
+}
+```
+
+
+
 
 
 
