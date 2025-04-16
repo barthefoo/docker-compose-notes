@@ -414,6 +414,33 @@ volumes:
 
 
 
+# Anki-Sync-Server
+
+> https://github.com/LuckyTurtleDev/docker-images/tree/main/dockerfiles/anki
+>
+> `mkdir ./data & chown -R 1000:1000 ./data`
+
+```yaml
+version: '3.3'
+services:
+    anki:
+        image: ghcr.io/luckyturtledev/anki
+        container_name: anki
+        environment:
+            - SYNC_USER1=username1:password1
+            - SYNC_USER2=foobar:123456
+            - RUST_LOG=info
+        ports:
+         - 0.0.0.0:10080:8080
+        volumes:
+            - './data:/data'
+        user: 1000:1000
+        restart: unless-stopped
+```
+
+
+
+
 
 
 
