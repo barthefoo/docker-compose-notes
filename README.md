@@ -440,6 +440,78 @@ services:
 
 
 
+# RocketMQ
+
+## 单机版本(Standalone)
+
+> Dashboard: `http://192.168.1.123:9999`
+
+* `.env` 文件
+```shell
+echo -e "DOCKER_VOLUME_DIRECTORY=./data\nROCKETMQ_VERSION=5.3.2\nDASHBOARD_VERSION=1.0.0\nBROKER_IP1=192.168.1.123" > .env
+```
+
+* `docker-compose.yml` 文件
+```yaml
+services:
+  namesrv:
+    container_name: rocketmq-namesrv
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    environment:
+      JAVA_OPT_EXT: -server -Xms256m -Xmx256m -Xmn256m
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./data}/logs:/home/rocketmq/logs
+    ports:
+      - "9876:9876"
+    command: sh ./mqnamesrv
+
+  broker:
+    container_name: rocketmq-broker
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    depends_on:
+      - namesrv
+    environment:
+      NAMESRV_ADDR: namesrv:9876
+      JAVA_OPT_EXT: -server -Xms512m -Xmx512m -Xmn256m
+      BROKER_CONF: |
+        brokerClusterName = MinimalCluster
+        brokerName = broker-a
+        brokerId = 0
+        deleteWhen = 04
+        fileReservedTime = 48
+        brokerRole = ASYNC_MASTER
+        flushDiskType = ASYNC_FLUSH
+        brokerIP1=${BROKER_IP1}
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./data}/logs:/home/rocketmq/logs
+      - ${DOCKER_VOLUME_DIRECTORY:-./data}/store:/home/rocketmq/store
+    ports:
+      - "8080:8080"
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    command: |
+      bash -c '
+      mkdir -p /home/rocketmq/conf &&
+      echo "$$BROKER_CONF" > /home/rocketmq/conf/broker.conf &&
+      ./mqbroker -c /home/rocketmq/conf/broker.conf
+      '
+
+  dashboard:
+    container_name: rocketmq-dashboard
+    image: apacherocketmq/rocketmq-dashboard:${DASHBOARD_VERSION}
+    depends_on:
+      - namesrv
+    ports:
+      - "9999:8080"
+    environment:
+      JAVA_OPTS: -Drocketmq.namesrv.addr=namesrv:9876
+
+networks:
+  default:
+    name: rocketmq-network
+```
+
 
 
 
@@ -516,7 +588,6 @@ services:
 | `docker compose config --volumes`  | 查看所有定义的卷名                 |
 
 ------
-
 
 
 
