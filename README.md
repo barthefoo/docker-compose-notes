@@ -448,7 +448,10 @@ services:
 
 * `.env` 文件
 ```shell
-echo -e "DOCKER_VOLUME_DIRECTORY=./data\nROCKETMQ_VERSION=5.3.2\nDASHBOARD_VERSION=1.0.0\nBROKER_IP1=192.168.1.123" > .env
+DOCKER_VOLUME_DIRECTORY=./data
+ROCKETMQ_VERSION=5.3.2
+DASHBOARD_VERSION=1.0.0
+BROKER_IP1=192.168.1.123
 ```
 
 * `docker-compose.yml` 文件
@@ -514,6 +517,218 @@ networks:
 
 
 
+## 集群版本(DLedger)
+
+> Dashboard: `http://192.168.1.123:9999`
+
+* `.env` 文件
+```shell
+ROCKETMQ_VERSION=5.3.2
+DASHBOARD_VERSION=1.0.0
+```
+
+* `docker-compose.yml` 文件
+```yaml
+services:
+  namesrv:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: rocketmq-namesrv
+    ports:
+      - "9876:9876"
+    command: sh -c "./mqnamesrv"
+    networks:
+      - rocketmq
+
+  dashboard:
+    image: apacherocketmq/rocketmq-dashboard:${DASHBOARD_VERSION}
+    container_name: rocketmq-dashboard
+    depends_on:
+      - namesrv
+    ports:
+      - "9999:8080"
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876"
+    networks:
+      - rocketmq
+
+  broker0:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: broker0
+    depends_on:
+      - namesrv
+    volumes:
+      - ./data/logs/n0:/home/rocketmq/logs
+      - ./data/store/n0:/home/rocketmq/store
+      - ./data/conf/broker-n0.conf:/home/rocketmq/conf/broker.conf:ro
+    command: ["sh", "-c", "./mqbroker -c /home/rocketmq/conf/broker.conf"]
+    networks:
+      - rocketmq
+
+  broker1:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: broker1
+    depends_on:
+      - namesrv
+    volumes:
+      - ./data/logs/n1:/home/rocketmq/logs
+      - ./data/store/n1:/home/rocketmq/store
+      - ./data/conf/broker-n1.conf:/home/rocketmq/conf/broker.conf:ro
+    command: ["sh", "-c", "./mqbroker -c /home/rocketmq/conf/broker.conf"]
+    networks:
+      - rocketmq
+
+  broker2:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: broker2
+    depends_on:
+      - namesrv
+    volumes:
+      - ./data/logs/n2:/home/rocketmq/logs
+      - ./data/store/n2:/home/rocketmq/store
+      - ./data/conf/broker-n2.conf:/home/rocketmq/conf/broker.conf:ro
+    command: ["sh", "-c", "./mqbroker -c /home/rocketmq/conf/broker.conf"]
+    networks:
+      - rocketmq
+
+networks:
+  rocketmq:
+    name: rocketmq-cluster-dledger
+```
+
+* `data/conf/broker-n0.conf` 文件
+```shell
+brokerClusterName=FoobarRaftCluster
+brokerName=broker0
+enableDLegerCommitLog=true
+dLegerGroup=RaftGroup
+dLegerPeers=n0-broker0:40000;n1-broker1:40001;n2-broker2:40002
+dLegerSelfId=n0
+listenPort=30911
+namesrvAddr=rocketmq-namesrv:9876
+storePathRootDir=/home/rocketmq/store
+storePathCommitLog=/home/rocketmq/store/commitlog
+flushDiskType=ASYNC_FLUSH
+```
+
+* `data/conf/broker-n1.conf` 文件
+```shell
+brokerClusterName=FoobarRaftCluster
+brokerName=broker1
+enableDLegerCommitLog=true
+dLegerGroup=RaftGroup
+dLegerPeers=n0-broker0:40000;n1-broker1:40001;n2-broker2:40002
+dLegerSelfId=n1
+listenPort=30911
+namesrvAddr=rocketmq-namesrv:9876
+storePathRootDir=/home/rocketmq/store
+storePathCommitLog=/home/rocketmq/store/commitlog
+flushDiskType=ASYNC_FLUSH
+```
+
+* `data/conf/broker-n2.conf` 文件
+```shell
+brokerClusterName=FoobarRaftCluster
+brokerName=broker2
+enableDLegerCommitLog=true
+dLegerGroup=RaftGroup
+dLegerPeers=n0-broker0:40000;n1-broker1:40001;n2-broker2:40002
+dLegerSelfId=n2
+listenPort=30911
+namesrvAddr=rocketmq-namesrv:9876
+storePathRootDir=/home/rocketmq/store
+storePathCommitLog=/home/rocketmq/store/commitlog
+flushDiskType=ASYNC_FLUSH
+```
+
+## 集群版本(Master-Slave)
+
+> Dashboard: `http://192.168.1.123:9999`
+
+* `.env` 文件
+```shell
+ROCKETMQ_VERSION=5.3.2
+DASHBOARD_VERSION=1.0.0
+```
+
+* `docker-compose.yml` 文件
+```yaml
+services:
+  namesrv:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: rocketmq-namesrv
+    ports:
+      - "9876:9876"
+    volumes:
+      - ./data/logs/namesrv:/home/rocketmq/logs
+    command: sh -c "./mqnamesrv"
+    networks:
+      - rocketmq
+
+  dashboard:
+    image: apacherocketmq/rocketmq-dashboard:${DASHBOARD_VERSION}
+    container_name: rocketmq-dashboard
+    depends_on:
+      - namesrv
+    ports:
+      - "9999:8080"
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=namesrv:9876"
+    networks:
+      - rocketmq
+  # Master
+  broker-a:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: rocketmq-broker-a
+    depends_on:
+      - namesrv
+    volumes:
+      - ./data/logs/a:/home/rocketmq/logs
+      - ./data/store/a:/home/rocketmq/store
+      - ./data/conf/broker-a.conf:/home/rocketmq/conf/broker.conf:ro
+    command: ["./mqbroker", "-c", "/home/rocketmq/conf/broker.conf", "-n", "namesrv:9876"]
+    networks:
+      - rocketmq
+
+  # Slave
+  broker-b:
+    image: apache/rocketmq:${ROCKETMQ_VERSION}
+    container_name: rocketmq-broker-b
+    depends_on:
+      - namesrv
+    volumes:
+      - ./data/logs/b:/home/rocketmq/logs
+      - ./data/store/b:/home/rocketmq/store
+      - ./data/conf/broker-b.conf:/home/rocketmq/conf/broker.conf:ro
+    command: ["./mqbroker", "-c", "/home/rocketmq/conf/broker.conf", "-n", "namesrv:9876"]
+    networks:
+      - rocketmq
+
+networks:
+  rocketmq:
+    name: rocketmq-cluster-master-slave
+```
+
+* `data/conf/broker-a.conf` 文件
+```shell
+brokerClusterName = foobar-rocketmq-cluster
+brokerName = broker-a
+brokerId = 0
+deleteWhen = 04
+fileReservedTime = 48
+brokerRole = ASYNC_MASTER
+flushDiskType = ASYNC_FLUSH
+```
+
+* `data/conf/broker-n1.conf` 文件
+```shell
+brokerClusterName = foobar-rocketmq-cluster
+brokerName = broker-b
+brokerId = 1
+deleteWhen = 04
+fileReservedTime = 48
+brokerRole = SLAVE
+flushDiskType = ASYNC_FLUSH
+```
 
 
 
