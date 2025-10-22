@@ -730,6 +730,126 @@ brokerRole = SLAVE
 flushDiskType = ASYNC_FLUSH
 ```
 
+# MongoDB
+
+## 单机版本(Standalone)
+
+* docker-compose.yml
+```yaml
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: 123456
+    command: ["mongod", "--config", "/etc/mongo/mongod.conf"]  # 指定自定义配置文件
+    volumes:
+      - ./data/data/db:/data/db
+      - ./data/config/mongod.conf:/etc/mongo/mongod.conf
+      - ./data/logs:/var/log/mongodb
+      - ./data/shared:/docker/shared
+```
+
+## Replica
+
+## keyfile
+```shell
+openssl rand -base64 756 > mongo-keyfile
+sudo chown 999:999 mongo-keyfile
+chmod 400 mongo-keyfile
+```
+
+* `docker-compose.yml` 文件
+```yaml
+services:
+  mongo1:
+    image: mongo:7.0
+    container_name: mongo1
+    restart: always
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/mongo-keyfile"]
+    volumes:
+      - mongo1_data:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile/mongo-keyfile:ro
+
+  mongo2:
+    image: mongo:7.0
+    container_name: mongo2
+    restart: always
+    ports:
+      - 27018:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/mongo-keyfile"]
+    volumes:
+      - mongo2_data:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile/mongo-keyfile:ro
+
+  mongo3:
+    image: mongo:7.0
+    container_name: mongo3
+    restart: always
+    ports:
+      - 27019:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/mongo-keyfile"]
+    volumes:
+      - mongo3_data:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile/mongo-keyfile:ro
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+```
+
+* 启动
+```shell
+docker-compose up -d
+```
+
+* 连接
+```shell
+docker exec -it mongo1 mongosh -u root -p rootpass --authenticationDatabase admin
+```
+
+* 初始化
+```js
+rs.initiate({
+  _id: "rs0",
+  members: [
+    {_id: 0, host: "mongo1:27017"},
+    {_id: 1, host: "mongo2:27017"},
+    {_id: 2, host: "mongo3:27017"}
+  ]
+})
+```
+
+* 集群状态
+```js
+rs.status()
+```
+
+* Navicat 连接
+修改 hosts
+```shell
+# MongoDB
+127.0.0.1 mongo1
+127.0.0.1 mongo2
+127.0.0.1 mongo3
+```
+
 
 
 # 附录
